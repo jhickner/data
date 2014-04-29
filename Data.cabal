@@ -21,7 +21,7 @@ executable data
   -- other-extensions:
   build-depends:       base >=4.6,
                        optparse-applicative >= 0.8.0.1,
-                       sqlite-simple >= 0.4.6.1,
+                       sqlite-simple >= 0.4.7.0,
                        time >= 1.4.2,
                        text >= 0.11
   -- hs-source-dirs:
