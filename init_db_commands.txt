@@ -1,0 +1,53 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE data (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TIMESTAMP,
+  body TEXT
+);
+CREATE TABLE tag (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name VARCHAR(30) NOT NULL UNIQUE
+);
+CREATE TABLE tag_link (
+  data_id INTEGER,
+  tag_id INTEGER,
+  FOREIGN KEY(data_id) REFERENCES data(id) ON DELETE CASCADE,
+  FOREIGN KEY(tag_id) REFERENCES tag(id) ON DELETE CASCADE,
+  PRIMARY KEY (data_id, tag_id)
+);
+
+INSERT INTO tag (name) VALUES('red');
+INSERT INTO tag (name) VALUES('yellow');
+INSERT INTO tag (name) VALUES('blue');
+INSERT INTO tag (name) VALUES('green');
+
+INSERT INTO data (ts, body) VALUES (CURRENT_TIMESTAMP, "car");
+INSERT INTO data (ts, body) VALUES (CURRENT_TIMESTAMP, "house");
+INSERT INTO data (ts, body) VALUES (CURRENT_TIMESTAMP, "a dog I saw");
+INSERT INTO data (ts, body) VALUES (CURRENT_TIMESTAMP, "something in the air");
+
+INSERT INTO tag_link(data_id, tag_id) VALUES (1, 1);
+INSERT INTO tag_link(data_id, tag_id) VALUES (2, 1);
+INSERT INTO tag_link(data_id, tag_id) VALUES (4, 1);
+INSERT INTO tag_link(data_id, tag_id) VALUES (3, 2);
+INSERT INTO tag_link(data_id, tag_id) VALUES (4, 2);
+
+
+SELECT
+  d.*
+FROM
+  data AS d
+INNER JOIN
+  tag_link as t
+ON
+  t.data_id = d.id
+AND
+  t.tag_id IN (
+    SELECT tag.id from tag where tag.name in ('red', 'yellow')
+  )
+GROUP BY
+  d.id
+HAVING
+  COUNT(d.id) = 2
+;
