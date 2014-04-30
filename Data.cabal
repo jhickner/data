@@ -20,6 +20,8 @@ executable data
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.6,
+                       aeson >= 0.7.0.3,
+                       bytestring >= 0.10.0.2,
                        optparse-applicative >= 0.8.0.1,
                        sqlite-simple >= 0.4.7.0,
                        time >= 1.4.2,

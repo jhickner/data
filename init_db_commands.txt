@@ -16,38 +16,3 @@ CREATE TABLE tag_link (
   FOREIGN KEY(tag_id) REFERENCES tag(id) ON DELETE CASCADE,
   PRIMARY KEY (data_id, tag_id)
 );
-
-INSERT INTO tag (name) VALUES('red');
-INSERT INTO tag (name) VALUES('yellow');
-INSERT INTO tag (name) VALUES('blue');
-INSERT INTO tag (name) VALUES('green');
-
-INSERT INTO data (body) VALUES ("car");
-INSERT INTO data (body) VALUES ("house");
-INSERT INTO data (body) VALUES ("a dog I saw");
-INSERT INTO data (body) VALUES ("something in the air");
-
-INSERT INTO tag_link(data_id, tag_id) VALUES (1, 1);
-INSERT INTO tag_link(data_id, tag_id) VALUES (2, 1);
-INSERT INTO tag_link(data_id, tag_id) VALUES (4, 1);
-INSERT INTO tag_link(data_id, tag_id) VALUES (3, 2);
-INSERT INTO tag_link(data_id, tag_id) VALUES (4, 2);
-
-
-SELECT
-  d.*
-FROM
-  data AS d
-INNER JOIN
-  tag_link as t
-ON
-  t.data_id = d.id
-AND
-  t.tag_id IN (
-    SELECT tag.id from tag where tag.name in ('red', 'yellow')
-  )
-GROUP BY
-  d.id
-HAVING
-  COUNT(d.id) = 2
-;
