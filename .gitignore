@@ -2,3 +2,6 @@ dist
 data.db
 .cabal-sandbox
 cabal.sandbox.config
+Backup.hs
+backup.js
+backupdata.db

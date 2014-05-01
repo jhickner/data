@@ -4,6 +4,9 @@
 [ ] - query command accepting list of tags
 
 
+delete from tag_link where data_id in (select data_id from tag_link except select id from data);
+delete from tag where id in (select id from tag except select tag_id from tag_link);
+
 
 -}
 
