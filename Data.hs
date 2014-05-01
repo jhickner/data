@@ -1,8 +1,7 @@
 {- TODO
 [X] - import the existing data from mongo
 [X] - reimport, adding "link" tag to any item that had a link
-[ ] - query command accepting list of tags
-
+[ ] - nice ANSI output
 
 delete from tag_link where data_id in (select data_id from tag_link except select id from data);
 delete from tag where id in (select id from tag except select tag_id from tag_link);
@@ -12,6 +11,7 @@ delete from tag where id in (select id from tag except select tag_id from tag_li
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
 
 import Control.Applicative
 import Control.Exception as E
@@ -22,11 +22,20 @@ import Data.List (intercalate, nub)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
+import Data.Time.Format
+import Data.Time.LocalTime
 import Database.SQLite.Simple
 import Database.SQLite.Simple.FromRow
 import Options.Applicative
+import System.Console.ANSI
+import System.Directory (getHomeDirectory)
+import System.FilePath ((</>))
+import System.Locale (defaultTimeLocale)
+
+-- TYPES
 
 data Data = Data
   { dId   :: Int
@@ -44,8 +53,7 @@ data Input
   | TagQuery [String]
   deriving (Show)
 
-main :: IO ()
-main = execParser (info (commands <**> helper) idm) >>= run
+-- INPUT
 
 commands :: Parser Input
 commands = subparser
@@ -62,14 +70,15 @@ commands = subparser
 run :: Input -> IO ()
 run i = case i of
     AddData body tags -> addData body tags
-    DeleteData id    -> deleteData' id
+    DeleteData id     -> deleteData' id
     TagQuery tags     -> tagQuery tags
   where
-    withConn' = withConnection "data.db"
+    withConn' act = getDBPath >>= flip withConnection act
     cleanTags = nub . map (T.toLower . T.pack)
     tagQuery tags = do
         res <- withConn' (flip queryAllTags (cleanTags tags))
-        mapM_ print res
+        tz <- getCurrentTimeZone
+        mapM_ (prettyPrint tz) res
     addData body tags = do
         res <- withConn' $ \conn -> withTransaction conn $ do
             insertData conn (cleanTags tags) (T.pack body) Nothing
@@ -77,6 +86,36 @@ run i = case i of
     deleteData' id = do
         res <- withConn' (flip deleteData id)
         putStrLn $ if res then "deleted." else "id not found!"
+
+getDBPath :: IO FilePath
+getDBPath = (</> ".data.db") <$> getHomeDirectory
+
+main :: IO ()
+main = execParser (info (commands <**> helper) idm) >>= run
+
+-- DISPLAY
+
+prettyPrint :: TimeZone -> Data -> IO ()
+prettyPrint tz Data{..} = do
+    out $ "[ " <> color Blue (jl 5 ' ' (show' dId))
+        <> " | " <> fmtTime dTs <> " | "
+        <> T.intercalate ", " (map (color Magenta) dTags) <> " ]"
+    out $ dBody <> "\n"
+  where
+    show' :: Show a => a -> Text
+    show' = T.pack . show
+    jl = T.justifyLeft
+    out = TIO.putStrLn
+    fmtTime = T.pack
+      . formatTime defaultTimeLocale "%b %d, %Y %I:%M %P"
+      . utcToLocalTime tz
+
+color :: Color -> Text -> Text
+color c t = T.concat
+    [ T.pack $ setSGRCode [SetColor Foreground Dull c]
+    , t
+    , T.pack $ setSGRCode [Reset]
+    ]
 
 -- DATABASE
 
@@ -99,6 +138,7 @@ queryAllTags conn tags = query conn sql tags
       , "INNER JOIN tag AS t ON t.id = tl.tag_id "
       , "GROUP BY d.id "
       , "HAVING COUNT(d.id) = " <> count
+      , " ORDER BY d.ts "
       ]
     -- sqlite can't parameter bind the (?,?,...) list for the IN clause, so we
     -- generate the correct number of ?'s and then bind a [Text]
