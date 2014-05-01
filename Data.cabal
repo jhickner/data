@@ -20,7 +20,7 @@ executable data
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.6,
-                       aeson >= 0.7.0.3,
+                       -- aeson >= 0.7.0.3,
                        ansi-terminal >= 0.6.1.1,
                        bytestring >= 0.10.0.2,
                        directory >= 1.2.0.1,

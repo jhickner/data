@@ -2,7 +2,9 @@
 [X] - import the existing data from mongo
 [X] - reimport, adding "link" tag to any item that had a link
 [X] - nice ANSI output
-[ ] - display the deleted item
+[X] - display the deleted item
+[ ] - list tags sorted by frequency
+[ ] - doesn't return all tags, only the tags used in the query
 
 cleaning orphan tag_links (ON DELETE CASCADE handles this):
 delete from tag_link where data_id in (select data_id from tag_link except select id from data);
@@ -19,7 +21,7 @@ import Control.Exception as E
 import Control.Monad
 --import Data.Aeson
 import qualified Data.ByteString.Lazy as BL
-import Data.List (intercalate, nub)
+import Data.List (intercalate, nub, sort)
 import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -76,24 +78,29 @@ run i = case i of
     TagQuery tags     -> tagQuery tags
   where
     withConn' act = getDBPath >>= flip withConnection act
-    cleanTags = nub . map (T.toLower . T.pack)
+    cleanTags = sort . nub . map (T.toLower . T.pack)
+
     tagQuery tags = do
         res <- withConn' (flip queryAllTags (cleanTags tags))
         tz <- getCurrentTimeZone
         mapM_ (prettyPrint tz) res
+
     addData body tags = do
         res <- withConn' $ \conn -> withTransaction conn $ do
             insertData conn (cleanTags tags) (T.pack body) Nothing
         putStrLn $ "added entry id: " ++ show res
+
     deleteData' id = do
         md <- withConn' (flip getData id)
-        case md of
-          Nothing -> putStrLn "id not not found!"
-          Just d  -> do
-              withConn' (flip deleteData id)
-              tz <- getCurrentTimeZone
-              prettyPrint tz d
-              putStrLn "deleted!"
+        maybe notFound ((>> delete) . display) md
+      where
+        notFound = putStrLn "id not not found!"
+        display d = do
+            tz <- getCurrentTimeZone
+            prettyPrint tz d
+        delete = do
+            withConn' (flip deleteData id)
+            putStrLn "deleted!"
 
 getDBPath :: IO FilePath
 getDBPath = (</> ".data.db") <$> getHomeDirectory
@@ -198,11 +205,11 @@ insertData conn tags body mts = do
 getOrInsertTag :: Connection -> Text -> IO Int
 getOrInsertTag conn tag = do
     res <- query conn "SELECT id FROM tag WHERE name=?" (Only tag)
-    case res of
-      (Only id':_) -> return id'
-      [] -> do
-          execute conn "INSERT INTO tag(name) VALUES(?)" (Only tag)
-          fromIntegral <$> lastInsertRowId conn
+    maybe insert (return . fromOnly) (listToMaybe res)
+  where
+    insert = do
+        execute conn "INSERT INTO tag(name) VALUES(?)" (Only tag)
+        fromIntegral <$> lastInsertRowId conn
 
 insertTagLink :: Connection -> Int -> Int -> IO ()
 insertTagLink conn dataId tagId = execute conn
