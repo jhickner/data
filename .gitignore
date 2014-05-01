@@ -5,3 +5,4 @@ cabal.sandbox.config
 Backup.hs
 backup.js
 backupdata.db
+deploy

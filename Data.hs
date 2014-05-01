@@ -1,11 +1,12 @@
 {- TODO
 [X] - import the existing data from mongo
 [X] - reimport, adding "link" tag to any item that had a link
-[ ] - nice ANSI output
+[X] - nice ANSI output
+[ ] - display the deleted item
 
+cleaning orphan tag_links (ON DELETE CASCADE handles this):
 delete from tag_link where data_id in (select data_id from tag_link except select id from data);
 delete from tag where id in (select id from tag except select tag_id from tag_link);
-
 
 -}
 
@@ -19,6 +20,7 @@ import Control.Monad
 --import Data.Aeson
 import qualified Data.ByteString.Lazy as BL
 import Data.List (intercalate, nub)
+import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -84,8 +86,14 @@ run i = case i of
             insertData conn (cleanTags tags) (T.pack body) Nothing
         putStrLn $ "added entry id: " ++ show res
     deleteData' id = do
-        res <- withConn' (flip deleteData id)
-        putStrLn $ if res then "deleted." else "id not found!"
+        md <- withConn' (flip getData id)
+        case md of
+          Nothing -> putStrLn "id not not found!"
+          Just d  -> do
+              withConn' (flip deleteData id)
+              tz <- getCurrentTimeZone
+              prettyPrint tz d
+              putStrLn "deleted!"
 
 getDBPath :: IO FilePath
 getDBPath = (</> ".data.db") <$> getHomeDirectory
@@ -97,15 +105,18 @@ main = execParser (info (commands <**> helper) idm) >>= run
 
 prettyPrint :: TimeZone -> Data -> IO ()
 prettyPrint tz Data{..} = do
-    out $ "[ " <> color Blue (jl 5 ' ' (show' dId))
-        <> " | " <> fmtTime dTs <> " | "
-        <> T.intercalate ", " (map (color Magenta) dTags) <> " ]"
-    out $ dBody <> "\n"
+    TIO.putStrLn $ T.concat
+        [ "[ "
+        , color Blue (T.justifyLeft 5 ' ' (T.pack . show $ dId))
+        , " | "
+        , fmtTime dTs
+        , " | "
+        , T.intercalate ", " (map (color Magenta) dTags)
+        , " ]\n"
+        , dBody
+        , "\n"
+        ]
   where
-    show' :: Show a => a -> Text
-    show' = T.pack . show
-    jl = T.justifyLeft
-    out = TIO.putStrLn
     fmtTime = T.pack
       . formatTime defaultTimeLocale "%b %d, %Y %I:%M %P"
       . utcToLocalTime tz
@@ -124,6 +135,21 @@ enableForeignKeySupport = flip execute_ "PRAGMA foreign_keys = ON"
 
 queryAll :: Connection -> IO [Data]
 queryAll conn = query_ conn "SELECT * FROM data"
+
+getData :: Connection -> Int -> IO (Maybe Data)
+getData conn id = do
+    res <- query conn sql (Only id)
+    return $ listToMaybe res
+  where
+    sql = Query $ T.concat
+      [ "SELECT d.*, GROUP_CONCAT(t.name) "
+      , "FROM data AS d "
+      , "INNER JOIN tag_link AS tl "
+      , "ON tl.data_id = d.id "
+      , "INNER JOIN tag AS t ON t.id = tl.tag_id "
+      , "WHERE d.id = ?"
+      , "GROUP BY d.id"
+      ]
 
 queryAllTags :: Connection -> [Text] -> IO [Data]
 queryAllTags conn tags = query conn sql tags
@@ -146,15 +172,10 @@ queryAllTags conn tags = query conn sql tags
     count = T.pack . show $ len
     qMarks = T.intercalate "," $ replicate len "?"
 
-deleteData :: Connection -> Int -> IO Bool
+deleteData :: Connection -> Int -> IO ()
 deleteData conn id = do
   enableForeignKeySupport conn
-  res <- query conn "SELECT id FROM data WHERE id=?" (Only id)
-  case res of
-    [(Only (_::Int))] -> do
-        execute conn "DELETE FROM data WHERE id=?" (Only id)
-        return True
-    _ -> return False
+  execute conn "DELETE FROM data WHERE id=?" (Only id)
 
 -- | Inserts a `Data` item along with all tags and tag_links.
 -- Should be run inside a transaction!
