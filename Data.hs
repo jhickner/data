@@ -3,8 +3,9 @@
 [X] - reimport, adding "link" tag to any item that had a link
 [X] - nice ANSI output
 [X] - display the deleted item
-[X] - doesn't return all tags, only the tags used in the query
-[ ] - list tags sorted by frequency
+[X] - return all tags, not just the tags used in the query
+[X] - new command to list tags sorted by frequency
+[ ] - clean up naming a bit
 
 cleaning orphan tag_links (ON DELETE CASCADE handles this):
 delete from tag_link where data_id in (select data_id from tag_link except select id from data);
@@ -55,6 +56,7 @@ data Input
   = AddData String [String]
   | DeleteData Int
   | TagQuery [String]
+  | TagFrequency Int
   deriving (Show)
 
 -- INPUT
@@ -64,18 +66,21 @@ commands = subparser
     ( command "add" (info addData (progDesc "Add an entry"))
    <> command "delete" (info deleteData (progDesc "Delete an entry"))
    <> command "query" (info tagQuery (progDesc "Query by tag(s)"))
+   <> command "tags" (info tagFreqQuery (progDesc "List N most popular tags"))
     )
   where
     addData = AddData <$> (argument str (metavar "BODY"))
                       <*> many (argument str (metavar "TAG..."))
     deleteData = DeleteData <$> (argument auto (metavar "TAG ID"))
     tagQuery = TagQuery <$> many (argument str (metavar "TAG..."))
+    tagFreqQuery = TagFrequency <$> (argument auto (metavar "N"))
 
 run :: Input -> IO ()
 run i = case i of
     AddData body tags -> addData body tags
     DeleteData id     -> deleteData' id
     TagQuery tags     -> tagQuery tags
+    TagFrequency n    -> tagFrequency n
   where
     withConn' act = getDBPath >>= flip withConnection act
     cleanTags = sort . nub . map (T.toLower . T.pack)
@@ -83,7 +88,10 @@ run i = case i of
     tagQuery tags = do
         res <- withConn' (flip queryAllTags (cleanTags tags))
         tz <- getCurrentTimeZone
-        mapM_ (prettyPrint tz) res
+        mapM_ (prettyPrintData tz) res
+
+    tagFrequency n =
+        withConn' (flip queryTagFrequency n) >>= mapM_ prettyPrintTagFrequency
 
     addData body tags = do
         res <- withConn' $ \conn -> withTransaction conn $ do
@@ -97,7 +105,7 @@ run i = case i of
         notFound = putStrLn "id not not found!"
         display d = do
             tz <- getCurrentTimeZone
-            prettyPrint tz d
+            prettyPrintData tz d
         delete = do
             withConn' (flip deleteData id)
             putStrLn "deleted!"
@@ -110,8 +118,8 @@ main = execParser (info (commands <**> helper) idm) >>= run
 
 -- DISPLAY
 
-prettyPrint :: TimeZone -> Data -> IO ()
-prettyPrint tz Data{..} = do
+prettyPrintData :: TimeZone -> Data -> IO ()
+prettyPrintData tz Data{..} = do
     TIO.putStrLn $ T.concat
         [ "[ "
         , color Blue (T.justifyLeft 5 ' ' (T.pack . show $ dId))
@@ -127,6 +135,15 @@ prettyPrint tz Data{..} = do
     fmtTime = T.pack
       . formatTime defaultTimeLocale "%b %d, %Y %I:%M %P"
       . utcToLocalTime tz
+
+prettyPrintTagFrequency :: (Int, Text) -> IO ()
+prettyPrintTagFrequency (count, tag) =
+    TIO.putStrLn $ T.concat
+      [ "[ "
+      , color Blue (T.justifyRight 4 ' ' (T.pack . show $ count))
+      , " ] "
+      , tag
+      ]
 
 color :: Color -> Text -> Text
 color c t = T.concat
@@ -174,6 +191,18 @@ queryAllTags conn tags = query conn sql tags
     len = length tags
     count = T.pack . show $ len
     qMarks = T.intercalate "," $ replicate len "?"
+
+queryTagFrequency :: Connection -> Int -> IO [(Int, Text)]
+queryTagFrequency conn limit = query conn sql (Only limit)
+  where
+    sql = Query $ T.concat
+      [ "SELECT COUNT(*), t.name "
+      , "FROM tag_link tl "
+      , "INNER JOIN tag t ON tl.tag_id = t.id "
+      , "GROUP BY tl.tag_id "
+      , "ORDER BY COUNT(*) DESC "
+      , "LIMIT ?"
+      ]
 
 deleteData :: Connection -> Int -> IO ()
 deleteData conn id = do
