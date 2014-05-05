@@ -3,8 +3,8 @@
 [X] - reimport, adding "link" tag to any item that had a link
 [X] - nice ANSI output
 [X] - display the deleted item
+[X] - doesn't return all tags, only the tags used in the query
 [ ] - list tags sorted by frequency
-[ ] - doesn't return all tags, only the tags used in the query
 
 cleaning orphan tag_links (ON DELETE CASCADE handles this):
 delete from tag_link where data_id in (select data_id from tag_link except select id from data);
@@ -150,10 +150,9 @@ getData conn id = do
   where
     sql = Query $ T.concat
       [ "SELECT d.*, GROUP_CONCAT(t.name) "
-      , "FROM data AS d "
-      , "INNER JOIN tag_link AS tl "
-      , "ON tl.data_id = d.id "
-      , "INNER JOIN tag AS t ON t.id = tl.tag_id "
+      , "FROM data d "
+      , "INNER JOIN tag_link tl ON tl.data_id = d.id "
+      , "INNER JOIN tag t ON t.id = tl.tag_id "
       , "WHERE d.id = ?"
       , "GROUP BY d.id"
       ]
@@ -163,15 +162,12 @@ queryAllTags conn tags = query conn sql tags
   where
     sql = Query $ T.concat
       [ "SELECT d.*, GROUP_CONCAT(t.name) "
-      , "FROM data AS d "
-      , "INNER JOIN tag_link as tl "
-      , "ON tl.data_id = d.id "
-      , "AND tl.tag_id IN "
-      , "(SELECT tag.id from tag where tag.name IN (" <> qMarks <> ")) "
-      , "INNER JOIN tag AS t ON t.id = tl.tag_id "
+      , "FROM data d "
+      , "INNER JOIN tag_link tl ON tl.data_id = d.id "
+      , "INNER JOIN tag t ON t.id = tl.tag_id "
       , "GROUP BY d.id "
-      , "HAVING COUNT(d.id) = " <> count
-      , " ORDER BY d.ts "
+      , "HAVING SUM(t.name in (" <> qMarks <> ")) = " <> count
+      , " ORDER BY d.ts"
       ]
     -- sqlite can't parameter bind the (?,?,...) list for the IN clause, so we
     -- generate the correct number of ?'s and then bind a [Text]
